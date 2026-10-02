@@ -1,0 +1,210 @@
+#include <cstddef>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+
+class encoder
+{
+public:
+    static constexpr size_t max_key_size = 256;
+
+private:
+    unsigned char* _key;
+    size_t _key_size;
+
+    static unsigned char* clone_key(unsigned char const* key, size_t key_size)
+    {
+        if (key == nullptr || key_size == 0 || key_size > max_key_size)
+        {
+            throw std::invalid_argument("encryption key must contain from 1 to 256 bytes");
+        }
+
+        unsigned char* copy = new unsigned char[key_size];
+        std::memcpy(copy, key, key_size);
+        return copy;
+    }
+
+    static void swap_bytes(unsigned char& first, unsigned char& second) noexcept
+    {
+        unsigned char buffer = first;
+        first = second;
+        second = buffer;
+    }
+
+public:
+    encoder(unsigned char const* key, size_t key_size)
+        : _key(clone_key(key, key_size)), _key_size(key_size)
+    {
+    }
+
+    encoder(encoder const& other)
+        : _key(clone_key(other._key, other._key_size)), _key_size(other._key_size)
+    {
+    }
+
+    encoder(encoder&& other) noexcept
+        : _key(other._key), _key_size(other._key_size)
+    {
+        other._key = nullptr;
+        other._key_size = 0;
+    }
+
+    encoder& operator=(encoder const& other)
+    {
+        if (this != &other)
+        {
+            unsigned char* copy = clone_key(other._key, other._key_size);
+            delete[] _key;
+            _key = copy;
+            _key_size = other._key_size;
+        }
+        return *this;
+    }
+
+    encoder& operator=(encoder&& other) noexcept
+    {
+        if (this != &other)
+        {
+            delete[] _key;
+            _key = other._key;
+            _key_size = other._key_size;
+            other._key = nullptr;
+            other._key_size = 0;
+        }
+        return *this;
+    }
+
+    ~encoder()
+    {
+        delete[] _key;
+    }
+
+    void set_key(unsigned char const* key, size_t key_size)
+    {
+        unsigned char* copy = clone_key(key, key_size);
+        delete[] _key;
+        _key = copy;
+        _key_size = key_size;
+    }
+
+    void encode(char const* input_path, char const* output_path, bool encrypt) const
+    {
+        static_cast<void>(encrypt);
+
+        if (_key == nullptr)
+        {
+            throw std::logic_error("encryption key is not set");
+        }
+        if (input_path == nullptr || output_path == nullptr || input_path[0] == '\0' || output_path[0] == '\0')
+        {
+            throw std::invalid_argument("file path must not be empty");
+        }
+        if (std::strcmp(input_path, output_path) == 0)
+        {
+            throw std::invalid_argument("input and output files must be different");
+        }
+
+        std::ifstream input(input_path, std::ios::binary);
+        if (!input.is_open())
+        {
+            throw std::runtime_error("cannot open input file");
+        }
+
+        std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+        if (!output.is_open())
+        {
+            throw std::runtime_error("cannot open output file");
+        }
+
+        unsigned char state[256];
+        for (size_t i = 0; i < 256; ++i)
+        {
+            state[i] = static_cast<unsigned char>(i);
+        }
+
+        size_t j = 0;
+        for (size_t i = 0; i < 256; ++i)
+        {
+            j = (j + state[i] + _key[i % _key_size]) % 256;
+            swap_bytes(state[i], state[j]);
+        }
+
+        size_t index_i = 0;
+        size_t index_j = 0;
+        unsigned char buffer[4096];
+
+        while (input)
+        {
+            input.read(reinterpret_cast<char*>(buffer), sizeof(buffer));
+            std::streamsize read_count = input.gcount();
+
+            for (std::streamsize k = 0; k < read_count; ++k)
+            {
+                index_i = (index_i + 1) % 256;
+                index_j = (index_j + state[index_i]) % 256;
+                swap_bytes(state[index_i], state[index_j]);
+                buffer[k] ^= state[(state[index_i] + state[index_j]) % 256];
+            }
+
+            if (read_count > 0)
+            {
+                output.write(reinterpret_cast<char const*>(buffer), read_count);
+                if (!output)
+                {
+                    throw std::runtime_error("cannot write to output file");
+                }
+            }
+        }
+
+        if (input.bad())
+        {
+            throw std::runtime_error("cannot read input file");
+        }
+
+        output.flush();
+        if (!output)
+        {
+            throw std::runtime_error("cannot write to output file");
+        }
+    }
+};
+
+int main(int argc, char* argv[])
+{
+    if (argc != 5)
+    {
+        std::cerr << "Usage: " << (argc > 0 ? argv[0] : "encoder")
+                  << " <key> <input file> <output file> <e|d>\n";
+        return 1;
+    }
+
+    bool encrypt = true;
+    if (std::strcmp(argv[4], "e") == 0)
+    {
+        encrypt = true;
+    }
+    else if (std::strcmp(argv[4], "d") == 0)
+    {
+        encrypt = false;
+    }
+    else
+    {
+        std::cerr << "Mode must be 'e' (encrypt) or 'd' (decrypt)\n";
+        return 1;
+    }
+
+    try
+    {
+        encoder worker(reinterpret_cast<unsigned char const*>(argv[1]), std::strlen(argv[1]));
+        worker.encode(argv[2], argv[3], encrypt);
+        std::cout << (encrypt ? "Encryption" : "Decryption") << " finished\n";
+    }
+    catch (std::exception const& error)
+    {
+        std::cerr << "Error: " << error.what() << '\n';
+        return 1;
+    }
+
+    return 0;
+}
