@@ -1,0 +1,176 @@
+#include <climits>
+#include <cstddef>
+#include <iostream>
+#include <stdexcept>
+
+class logical_values_array
+{
+private:
+    unsigned int _value;
+
+public:
+    static constexpr size_t bits_count = sizeof(unsigned int) * CHAR_BIT;
+    static constexpr size_t binary_buffer_size = bits_count + 1;
+
+    explicit logical_values_array(unsigned int value = 0) : _value(value)
+    {
+    }
+
+    logical_values_array(logical_values_array const&) = default;
+    logical_values_array(logical_values_array&&) = default;
+    logical_values_array& operator=(logical_values_array const&) = default;
+    logical_values_array& operator=(logical_values_array&&) = default;
+    ~logical_values_array() = default;
+
+    unsigned int get_value() const noexcept
+    {
+        return _value;
+    }
+
+    logical_values_array inversion() const
+    {
+        return logical_values_array(~_value);
+    }
+
+    logical_values_array conjunction(logical_values_array const& other) const
+    {
+        return logical_values_array(_value & other._value);
+    }
+
+    logical_values_array disjunction(logical_values_array const& other) const
+    {
+        return logical_values_array(_value | other._value);
+    }
+
+    logical_values_array addition_modulo_two(logical_values_array const& other) const
+    {
+        return logical_values_array(_value ^ other._value);
+    }
+
+    logical_values_array implication(logical_values_array const& other) const
+    {
+        return inversion().disjunction(other);
+    }
+
+    logical_values_array coimplication(logical_values_array const& other) const
+    {
+        return conjunction(other.inversion());
+    }
+
+    logical_values_array equivalence(logical_values_array const& other) const
+    {
+        return addition_modulo_two(other).inversion();
+    }
+
+    logical_values_array pierce_arrow(logical_values_array const& other) const
+    {
+        return disjunction(other).inversion();
+    }
+
+    logical_values_array sheffer_stroke(logical_values_array const& other) const
+    {
+        return conjunction(other).inversion();
+    }
+
+    static bool equals(logical_values_array const& first, logical_values_array const& second) noexcept
+    {
+        return first._value == second._value;
+    }
+
+    bool get_bit(size_t position) const
+    {
+        if (position >= bits_count)
+        {
+            throw std::out_of_range("bit position is out of range");
+        }
+        return ((_value >> position) & 1u) != 0u;
+    }
+
+    bool operator[](size_t position) const
+    {
+        return get_bit(position);
+    }
+
+    void to_binary_string(char* buffer) const
+    {
+        if (buffer == nullptr)
+        {
+            throw std::invalid_argument("buffer must not be null");
+        }
+        for (size_t i = 0; i < bits_count; ++i)
+        {
+            buffer[i] = get_bit(bits_count - 1 - i) ? '1' : '0';
+        }
+        buffer[bits_count] = '\0';
+    }
+};
+
+static bool read_value(char const* prompt, unsigned int& value)
+{
+    std::cout << prompt;
+    long long input = 0;
+    if (!(std::cin >> input) || input < 0 || input > static_cast<long long>(UINT_MAX))
+    {
+        return false;
+    }
+    value = static_cast<unsigned int>(input);
+    return true;
+}
+
+static void print_result(char const* title, logical_values_array const& value)
+{
+    char buffer[logical_values_array::binary_buffer_size];
+    value.to_binary_string(buffer);
+    std::cout << title << ": " << buffer << " (" << value.get_value() << ")\n";
+}
+
+int main()
+{
+    unsigned int first_input = 0;
+    unsigned int second_input = 0;
+
+    if (!read_value("Enter the first integer from 0 to 4294967295: ", first_input) ||
+        !read_value("Enter the second integer from 0 to 4294967295: ", second_input))
+    {
+        std::cerr << "Invalid input\n";
+        return 1;
+    }
+
+    try
+    {
+        logical_values_array first(first_input);
+        logical_values_array second(second_input);
+
+        print_result("first", first);
+        print_result("second", second);
+        print_result("inversion of first", first.inversion());
+        print_result("conjunction", first.conjunction(second));
+        print_result("disjunction", first.disjunction(second));
+        print_result("implication", first.implication(second));
+        print_result("coimplication", first.coimplication(second));
+        print_result("addition modulo 2", first.addition_modulo_two(second));
+        print_result("equivalence", first.equivalence(second));
+        print_result("Pierce arrow", first.pierce_arrow(second));
+        print_result("Sheffer stroke", first.sheffer_stroke(second));
+
+        std::cout << "equals: " << (logical_values_array::equals(first, second) ? "yes" : "no") << '\n';
+        std::cout << "bit 0 of first: " << first[0] << '\n';
+        std::cout << "bit 5 of first: " << first.get_bit(5) << '\n';
+
+        try
+        {
+            first.get_bit(logical_values_array::bits_count);
+        }
+        catch (std::out_of_range const& error)
+        {
+            std::cout << "Expected error: " << error.what() << '\n';
+        }
+    }
+    catch (std::exception const& error)
+    {
+        std::cerr << "Error: " << error.what() << '\n';
+        return 1;
+    }
+
+    return 0;
+}
